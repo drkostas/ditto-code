@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "understudy"
+version = "0.1.0"
+description = "Run Claude Code on a local model through Ollama, choosing the largest model that fits in the memory free right now"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Konstantinos Georgiou" }]
+dependencies = []
+keywords = ["claude-code", "ollama", "local-llm", "qwen", "proxy", "agents"]
+classifiers = ["Programming Language :: Python :: 3", "Topic :: Software Development", "Topic :: Utilities"]
+
+[project.urls]
+Homepage = "https://github.com/drkostas/understudy"
+
+[project.scripts]
+understudy = "understudy.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+understudy = ["skills/*/SKILL.md"]
