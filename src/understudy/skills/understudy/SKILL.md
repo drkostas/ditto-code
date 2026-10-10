@@ -59,8 +59,8 @@ tests, read the diff) before building on it. It is a weaker model, whatever the 
   stays loaded (Ollama unloads it after 10 idle minutes).
 - **Thinking.** The proxy turns it off: Qwen's templates drop earlier reasoning from the history,
   so with thinking on every turn re-reads the whole conversation instead of reusing the cache.
-- **A context window as large as Claude's.** The largest rungs run at 262,144 tokens and the
-  settings tell Claude Code so, so it compacts before the window fills. A chat in a folder with
+- **A context window as large as Claude's.** The settings tell Claude Code 131,072 tokens, so it
+  compacts before the conversation needs a rung that does not fit in memory. A chat in a folder with
   long CLAUDE.md files starts at 100,000 tokens or more before the first message.
 
 ## When something is wrong

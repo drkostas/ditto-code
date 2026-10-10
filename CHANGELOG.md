@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Claude Code is told a 131,072-token window by default, so it compacts before the conversation needs a rung that does not fit beside other work on a 32 GB machine. A chat told 262,144 never compacted and stalled once it passed 128k. `understudy settings --context` raises it
+
 ## 0.4.0
 
 - A streamed request is answered at once and kept alive with ping events every 15 seconds until Ollama starts its answer. Reading a long prompt takes minutes and Ollama sends nothing meanwhile, and Claude Code gave up at about five

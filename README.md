@@ -38,7 +38,7 @@ understudy setup-claude          # writes the settings file and links the skill 
 understudy serve &               # the proxy; run it under launchd or systemd in real use
 ```
 
-Then create the ladder in Ollama, one model for each window you want. The settings file tells Claude Code that the window is 262,144 tokens, so the largest rung should have that much, and Claude Code compacts the conversation before it fills.
+Then create the ladder in Ollama, one model for each window you want. The settings file tells Claude Code that the window is 131,072 tokens, so it compacts the conversation before it needs more. On a machine with room for a larger window, `understudy settings --context 262144` raises it.
 
 ```
 # qwen3.5-9b.Modelfile
