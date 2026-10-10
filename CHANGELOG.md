@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- A local chat keeps only the MCP servers it is told to keep (`--keep-mcp`); every other server, plugin server, claude.ai connector and the Chrome extension is denied in its settings file, which removes their tools from the request. Against a non-Anthropic backend Claude Code sends every connected server's full schemas each time, measured at about 1 MB
+- The window a request needs is estimated from bytes per token learned from what Ollama counted (the most cautious of the last 20), with 5% to spare, instead of a fixed three bytes a token
+
 ## 0.2.0
 
 - A model can be several rungs, one per context window (`model:64k`, `:128k`, `:256k`). The proxy estimates the window a request needs and picks the largest model that fits in memory at its smallest window that holds the conversation, and a loaded rung gives way when its window is too small

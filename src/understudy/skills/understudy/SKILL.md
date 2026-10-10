@@ -51,6 +51,9 @@ tests, read the diff) before building on it. It is a weaker model, whatever the 
 - **Remote Control.** Claude Code turns it off whenever requests go anywhere but Anthropic. Reach
   a local chat through its terminal (or tmux) instead.
 - **Anthropic's server tools**, such as hosted web search.
+- **Most MCP servers.** Only the servers named with `--keep-mcp` stay; the rest are denied in the
+  settings file, because without Anthropic's on-demand tool loading every server's schemas are
+  sent with every request (about 1 MB measured). Built-in tools are all there.
 - **Speed on the first turn.** A fresh chat sends the whole system prompt and every CLAUDE.md, and
   a laptop reads that at a few hundred tokens a second. Later turns reuse the cache while the model
   stays loaded (Ollama unloads it after 10 idle minutes).

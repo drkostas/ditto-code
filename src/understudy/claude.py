@@ -8,6 +8,11 @@ chats from their command line keeps it local.
 
 Two things a local chat does not have: Remote Control (Claude Code turns it off whenever requests
 go anywhere but Anthropic) and Anthropic's own server tools such as web search.
+
+It also keeps only the MCP servers it is told to keep. Against anything but Anthropic, Claude Code
+does not load MCP tools on demand: it sends every connected server's full schemas with every
+request. With a few dozen servers that was about 1 MB, some 250,000 tokens, more than a local
+model's whole window. A deny rule on a server removes its tools from the request.
 """
 from __future__ import annotations
 
@@ -20,7 +25,20 @@ MODEL = "local"
 CONTEXT = 262144          # the largest rung window; Claude Code compacts before it
 
 
-def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT) -> dict:
+def mcp_deny(keep: list[str] | tuple[str, ...] = (), home: Path | None = None) -> list[str]:
+    """Deny rules for every MCP server except `keep`: each user server in ~/.claude.json by name,
+    and every plugin's, claude.ai connector's and the Chrome extension's servers by pattern."""
+    home = home or Path.home()
+    try:
+        servers = json.loads((home / ".claude.json").read_text()).get("mcpServers", {})
+    except (OSError, ValueError):
+        servers = {}
+    rules = [f"mcp__{name}" for name in sorted(servers) if name not in keep]
+    return rules + ["mcp__plugin_*", "mcp__claude_ai_*", "mcp__claude-in-chrome"]
+
+
+def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT,
+             deny: list[str] | None = None) -> dict:
     env = {
         "ANTHROPIC_BASE_URL": url,
         "ANTHROPIC_AUTH_TOKEN": "understudy",        # any value: the proxy checks none, but one
@@ -35,15 +53,19 @@ def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT) -> dic
         "API_TIMEOUT_MS": "3600000",                 # a first turn on a laptop takes minutes
         "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
     }
-    return {"model": MODEL, "env": env}
+    out = {"model": MODEL, "env": env}
+    if deny:
+        out["permissions"] = {"deny": deny}
+    return out
 
 
 def default_path(home: Path | None = None) -> Path:
     return (home or Path.home()) / ".config" / "understudy" / "claude-settings.json"
 
 
-def write_settings(path: Path, url: str, context: int = CONTEXT) -> bool:
-    body = json.dumps(settings(url, context), indent=2) + "\n"
+def write_settings(path: Path, url: str, context: int = CONTEXT,
+                   keep_mcp: list[str] | tuple[str, ...] = (), home: Path | None = None) -> bool:
+    body = json.dumps(settings(url, context, mcp_deny(keep_mcp, home)), indent=2) + "\n"
     if path.exists() and path.read_text() == body:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
