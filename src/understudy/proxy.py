@@ -9,6 +9,12 @@ back unchanged. It listens on the loopback only and holds no credential.
     GET  /status        free memory, the ladder, what is loaded, what the next request would get,
                         and the last choices made
     POST /v1/messages   (and anything else under /v1/) forwarded to Ollama
+
+Two things are changed in a request on the way. The model name, and thinking, which is turned off
+unless `thinking` is set: Qwen's templates drop earlier reasoning from the history, so with
+thinking on the next turn no longer extends what the model has cached and it reads the whole
+conversation again (measured 2026-10-10: 4.1 s against 0.1 s for a 16,000-token prompt, minutes
+for a real chat).
 """
 from __future__ import annotations
 
@@ -38,6 +44,8 @@ class Config:
     budget: int | None = None            # the GPU working-set limit; None = derive from total RAM
     state: Path = field(default_factory=lambda: Path.home() / ".local" / "state" / "understudy")
     timeout: float = 3600.0              # a first turn reads the whole conversation: minutes
+    thinking: bool = False               # see the module docstring
+    output_cap: int = 16000              # the most of max_tokens counted toward the window
 
     def gpu_budget(self, total: int | None) -> int | None:
         """Apple Silicon lets the GPU wire about three quarters of memory by default (Ollama logs
@@ -59,6 +67,7 @@ class Proxy:
         self.measured = ladder.Measurements(cfg.state / "measured.json")
         self.recent: deque = deque(maxlen=50)
         self._choose_lock = threading.Lock()
+        self._contexts: dict[tuple[str, str], int | None] = {}
 
     # ---- what Ollama has
     def tags(self) -> list[dict]:
@@ -67,15 +76,34 @@ class Proxy:
     def loaded(self) -> list[dict]:
         return _get_json(self.cfg.ollama + "/api/ps").get("models", [])
 
-    def ladder(self) -> list[ladder.Rung]:
-        return ladder.rungs(self.tags(), self.cfg.prefix, self.measured)
+    def context_of(self, name: str, digest: str) -> int | None:
+        """A rung's num_ctx, from Ollama's /api/show, once per model digest."""
+        key = (name, digest)
+        if key not in self._contexts:
+            req = urllib.request.Request(self.cfg.ollama + "/api/show",
+                                         json.dumps({"model": name}).encode(),
+                                         {"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                self._contexts[key] = ladder.num_ctx(json.loads(r.read()).get("parameters"))
+        return self._contexts[key]
 
-    def choose(self) -> ladder.Choice:
+    def ladder(self) -> list[ladder.Rung]:
+        tags = self.tags()
+        contexts = {m["name"]: self.context_of(m["name"], m.get("digest", ""))
+                    for m in tags if m.get("name", "").startswith(self.cfg.prefix)}
+        return ladder.rungs(tags, self.cfg.prefix, self.measured, contexts)
+
+    def needed(self, raw: bytes, body: dict) -> int:
+        """The window a request needs: its prompt, estimated on the high side from the bytes sent
+        (about three bytes a token for JSON full of code), plus room for the answer."""
+        return len(raw) // 3 + min(int(body.get("max_tokens") or 0), self.cfg.output_cap)
+
+    def choose(self, needed: int = 0) -> ladder.Choice:
         with self._choose_lock:
             resident = {m["name"]: int(m.get("size", 0)) for m in self.loaded()}
             total = self._total()
             c = ladder.choose(self.ladder(), self._available(), resident, self.cfg.headroom,
-                              self.cfg.gpu_budget(total))
+                              self.cfg.gpu_budget(total), needed)
             c.details["at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             self.recent.appendleft(c.as_dict())
             self._log(c.as_dict())
@@ -166,7 +194,7 @@ def handler_for(proxy: Proxy):
                 return self._send(400, _error("invalid_request_error", "the body is not JSON"))
             if "model" in body:
                 try:
-                    c = proxy.choose()
+                    c = proxy.choose(proxy.needed(raw, body))
                 except (OSError, ValueError, urllib.error.URLError) as e:
                     return self._send(502, _error("api_error", f"understudy: Ollama did not answer: {e}"))
                 if c.rung is None:
@@ -176,6 +204,8 @@ def handler_for(proxy: Proxy):
                     return self._send(code, _error("overloaded_error" if code == 529 else "api_error",
                                                    "understudy: " + c.reason))
                 body["model"] = c.rung.name
+                if not proxy.cfg.thinking:
+                    body["thinking"] = {"type": "disabled"}
             self._forward(json.dumps(body).encode())
 
         def _forward(self, data: bytes | None):

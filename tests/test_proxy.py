@@ -39,6 +39,8 @@ class FakeOllama(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/api/show":
+            return self._json({"parameters": "temperature 0.6\nnum_ctx 131072\n"})
         FakeOllama.seen.append((self.path, body, self.headers.get("anthropic-version")))
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -84,6 +86,8 @@ def test_the_request_goes_to_the_largest_model_that_fits_and_streams_back(proxy)
     # 12 GB free: the 20 GB rung needs ~24 with its estimate, the 6 GB one ~8.6 plus 2 of margin
     assert path == "/v1/messages" and body["model"] == "understudy/small"
     assert version == "2023-06-01" and body["messages"][0]["content"] == "hi"
+    # thinking is turned off, so the next turn extends what the model has cached
+    assert body["thinking"] == {"type": "disabled"}
 
     free["bytes"] = int(40 * GB)
     post(url, {"model": "local", "messages": []}).read()
@@ -129,3 +133,13 @@ def test_a_local_chat_is_claude_with_a_settings_file(tmp_path):
                              "CLAUDE_CODE_SUBAGENT_MODEL")} == {"local"}
     argv = claude.command(path, ["-n", "x"])
     assert argv[0].endswith("claude") and argv[1:] == ["--settings", str(path), "-n", "x"]
+
+
+def test_a_request_longer_than_every_window_is_refused(proxy):
+    url, free, _ = proxy
+    free["bytes"] = int(64 * GB)
+    long = "x" * 450_000                       # about 150,000 tokens, more than the 131,072 window
+    with pytest.raises(urllib.error.HTTPError) as e:
+        post(url, {"model": "local", "max_tokens": 1000,
+                   "messages": [{"role": "user", "content": long}]})
+    assert e.value.code == 500 and "window" in json.loads(e.value.read())["error"]["message"]

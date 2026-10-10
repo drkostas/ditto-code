@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 MODEL = "local"
-CONTEXT = 131072          # the num_ctx every rung's Modelfile sets; Claude Code compacts before it
+CONTEXT = 262144          # the largest rung window; Claude Code compacts before it
 
 
 def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT) -> dict:
@@ -31,7 +31,7 @@ def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT) -> dic
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": MODEL,
         "CLAUDE_CODE_SUBAGENT_MODEL": MODEL,
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS": str(context),
-        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
         "API_TIMEOUT_MS": "3600000",                 # a first turn on a laptop takes minutes
         "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
     }

@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--budget-gb", type=float, default=None,
                    help="the GPU working-set limit Ollama logs at start (default: 78%% of RAM)")
     s.add_argument("--state", type=Path, default=None)
+    s.add_argument("--thinking", action="store_true",
+                   help="leave thinking on (each turn then re-reads the whole conversation)")
     sub.add_parser("status")
     c = sub.add_parser("claude", add_help=False)
     c.add_argument("args", nargs=argparse.REMAINDER)
@@ -48,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
         u = urlparse(a.url)
         cfg = Config(ollama=a.ollama, host=u.hostname or "127.0.0.1", port=u.port or 11435,
                      prefix=a.prefix, headroom=int(a.headroom_gb * GB),
-                     budget=int(a.budget_gb * GB) if a.budget_gb else None)
+                     budget=int(a.budget_gb * GB) if a.budget_gb else None,
+                     thinking=a.thinking)
         if a.state:
             cfg.state = a.state
         serve(cfg)

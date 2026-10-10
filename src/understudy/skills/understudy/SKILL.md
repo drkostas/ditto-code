@@ -20,12 +20,15 @@ picks a model and passes the request to Ollama.
 
 ## Which model answers
 
-Every Ollama model named `understudy/<x>` is a rung of the ladder. For each request:
+Every Ollama model named `understudy/<x>` is a rung of the ladder, one per context window
+(`understudy/qwen3.5-9b:64k`, `:128k`, `:256k`: same weights, different context cache). For each
+request the proxy estimates the window it needs (request bytes / 3 plus the answer), then:
 
-1. A rung that is already loaded keeps it. Swapping models mid-chat would mean reading the whole
-   conversation again, which takes minutes.
-2. Otherwise the largest rung whose measured memory need, plus 2 GB of margin, fits in what the
-   system can free without swapping, and within the GPU budget.
+1. A loaded rung whose window holds it keeps it. Swapping models mid-chat would mean reading the
+   whole conversation again, which takes minutes.
+2. Otherwise models largest first, each at its smallest window that holds the conversation: the
+   first whose measured memory need, plus 2 GB of margin, fits in what the system can free without
+   swapping, and within the GPU budget.
 3. Otherwise the request is refused with HTTP 529 and the numbers. Claude Code shows the message
    and retries with backoff, so closing a few chats lets it continue.
 
@@ -51,8 +54,11 @@ tests, read the diff) before building on it. It is a weaker model, whatever the 
 - **Speed on the first turn.** A fresh chat sends the whole system prompt and every CLAUDE.md, and
   a laptop reads that at a few hundred tokens a second. Later turns reuse the cache while the model
   stays loaded (Ollama unloads it after 10 idle minutes).
-- **A context window as large as Claude's.** The rungs run at 131,072 tokens and the settings tell
-  Claude Code so, so it compacts before the window fills.
+- **Thinking.** The proxy turns it off: Qwen's templates drop earlier reasoning from the history,
+  so with thinking on every turn re-reads the whole conversation instead of reusing the cache.
+- **A context window as large as Claude's.** The largest rungs run at 262,144 tokens and the
+  settings tell Claude Code so, so it compacts before the window fills. A chat in a folder with
+  long CLAUDE.md files starts at 100,000 tokens or more before the first message.
 
 ## When something is wrong
 
@@ -61,5 +67,5 @@ tests, read the diff) before building on it. It is a weaker model, whatever the 
 - `502 ... Ollama did not answer`: Ollama is down. `curl -s 127.0.0.1:11434/api/version`.
 - A rung's need looks wrong: it is re-measured each time the rung is loaded, keeping the largest
   size seen for that model digest, in `~/.local/state/understudy/measured.json`.
-- Adding a rung: create an Ollama model named `understudy/<x>` with `num_ctx 131072`. Nothing else
-  needs to change, because the ladder is read from Ollama on every request.
+- Adding a rung: create an Ollama model named `understudy/<x>:<n>k` with `num_ctx <n*1024>`.
+  Nothing else needs to change, because the ladder is read from Ollama on every request.
