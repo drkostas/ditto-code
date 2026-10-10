@@ -16,11 +16,15 @@ understudy proxy (127.0.0.1:11435)
 Ollama (127.0.0.1:11434), Anthropic Messages endpoint
 ```
 
-The ladder is every Ollama model whose name starts with `understudy/`. For each request the proxy does the following.
+The ladder is every Ollama model whose name starts with `understudy/`. One model can be several rungs, one for each context window (`understudy/qwen3.5-9b:64k`, `:128k` and `:256k`). They share the same weights on disk, but Ollama reserves the context cache when it loads a model, so a short conversation on a small window leaves gigabytes free.
 
-1. If one of those models is already loaded, it uses that one. Changing models in the middle of a chat would mean reading the whole conversation again, which takes minutes on a laptop.
-2. If none is loaded, it uses the largest one whose memory need, plus a margin of 2 GB, fits in the memory the system can free now, and within the GPU's memory limit.
+For each request the proxy estimates how many tokens of window the conversation needs, and then does the following.
+
+1. If a model is already loaded and its window holds the conversation, it uses that one. Changing models in the middle of a chat would mean reading the whole conversation again, which takes minutes on a laptop.
+2. Otherwise it takes the models from largest to smallest, each at its smallest window that holds the conversation, and uses the first whose memory need, plus a margin of 2 GB, fits in the memory the system can free now and within the GPU's memory limit.
 3. If none fits, it refuses with HTTP 529 and says how much memory was free and how much the smallest model needs. Claude Code shows that message and tries again after a pause.
+
+The proxy also turns thinking off. Qwen's chat templates leave earlier reasoning out of the history, so with thinking on, each new turn no longer continues what the model has cached, and it reads the whole conversation again. On a 16,000-token prompt that was 4.1 seconds against 0.1 seconds with thinking off, and on a real chat it is minutes. `understudy serve --thinking` turns it back on.
 
 A model's memory need is measured. The first time a model is loaded, Ollama reports how much memory it really takes (the weights, the context cache and the working buffers), and understudy keeps that number for that exact model version. Before the first load it uses a cautious estimate from the file size, and `understudy status` says which numbers are measured.
 
@@ -34,17 +38,19 @@ understudy setup-claude          # writes the settings file and links the skill 
 understudy serve &               # the proxy; run it under launchd or systemd in real use
 ```
 
-Then create the ladder in Ollama. Every model needs `num_ctx 131072`, because the settings file tells Claude Code that the context window is 131,072 tokens and Claude Code compacts the conversation before that.
+Then create the ladder in Ollama, one model for each window you want. The settings file tells Claude Code that the window is 262,144 tokens, so the largest rung should have that much, and Claude Code compacts the conversation before it fills.
 
 ```
-# understudy/qwen3.5-9b.Modelfile
+# qwen3.5-9b.Modelfile
 FROM qwen3.5:9b
 PARAMETER temperature 0.6
-PARAMETER num_ctx 131072
 ```
 
 ```bash
-ollama create understudy/qwen3.5-9b -f understudy/qwen3.5-9b.Modelfile
+for k in 64 128 256; do
+  (cat qwen3.5-9b.Modelfile; echo "PARAMETER num_ctx $((k * 1024))") > /tmp/m
+  ollama create "understudy/qwen3.5-9b:${k}k" -f /tmp/m
+done
 ```
 
 Recommended Ollama settings for one person on one machine are `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_NUM_PARALLEL=1`, `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0`. They keep only one model and one context in memory at a time.
@@ -62,12 +68,13 @@ understudy status                # free memory, the ladder, what the next reques
 
 - Remote Control. Claude Code turns it off when requests go to anything other than Anthropic.
 - Anthropic's hosted tools, such as web search.
-- A fast first turn. A new chat sends the whole system prompt and every CLAUDE.md file, and a laptop reads that at a few hundred tokens per second. Later turns are faster while the model stays loaded.
+- A fast first turn. A new chat sends the whole system prompt and every CLAUDE.md file, often 50,000 to 140,000 tokens, and a laptop reads that at a few hundred tokens per second. Later turns reuse the cache while the model stays loaded and take seconds.
+- Thinking. It is off so that the cache works (see above).
 - The same quality. The harness is the same, but a model that fits on a laptop makes more mistakes than Claude. Check its work with tests and by reading the diff.
 
 ## Options
 
-`understudy serve` takes `--ollama` (default `http://127.0.0.1:11434`), `--prefix` (default `understudy/`), `--headroom-gb` (default 2) and `--budget-gb`, the GPU memory limit. On Apple Silicon Ollama prints that limit when it starts (for example `total="25.0 GiB"` on a 32 GB Mac), and the default is 78% of RAM, which matches it. `--url` sets where the proxy listens (default `http://127.0.0.1:11435`).
+`understudy serve` takes `--ollama` (default `http://127.0.0.1:11434`), `--prefix` (default `understudy/`), `--headroom-gb` (default 2), `--thinking` and `--budget-gb`, the GPU memory limit. On Apple Silicon Ollama prints that limit when it starts (for example `total="25.0 GiB"` on a 32 GB Mac), and the default is 78% of RAM, which matches it. `--url` sets where the proxy listens (default `http://127.0.0.1:11435`).
 
 ## License
 

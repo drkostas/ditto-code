@@ -46,8 +46,8 @@ def test_a_measurement_replaces_the_estimate_only_for_the_same_digest(tmp_path):
     assert m.put("understudy/small", "a", int(6 * GB)) is False
 
 
-def rung(name, need):
-    return ladder.Rung(name, "d", need, need, True)
+def rung(name, need, context=262144, disk=None):
+    return ladder.Rung(name, "d", disk if disk is not None else need, need, True, context)
 
 
 LADDER = [rung("big", int(23 * GB)), rung("mid", int(18 * GB)), rung("small", int(8 * GB))]
@@ -82,3 +82,42 @@ def test_nothing_fits_says_why_and_never_loads_blind():
     c = ladder.choose(LADDER, None, {}, int(2 * GB), None)
     assert c.rung is None and "could not be read" in c.reason
     assert ladder.choose([], int(64 * GB), {}, 0, None).rung is None
+
+
+def test_the_window_comes_from_ollama_or_else_the_tag():
+    assert ladder.num_ctx("temperature 0.6\nnum_ctx 65536\n") == 65536
+    assert ladder.num_ctx("temperature 0.6") is None
+    assert ladder.context_from_tag("understudy/qwen3.5-9b:128k") == 131072
+    assert ladder.context_from_tag("understudy/qwen3.5-9b") is None
+
+
+# one model in three windows: the same weights on disk, more context cache for a bigger window
+WINDOWS = [rung("q9:64k", int(8 * GB), 65536, int(6.6 * GB)),
+           rung("q9:128k", int(9 * GB), 131072, int(6.6 * GB)),
+           rung("q9:256k", int(11.5 * GB), 262144, int(6.6 * GB)),
+           rung("q35:64k", int(19 * GB), 65536, int(17 * GB)),
+           rung("q35:256k", int(21 * GB), 262144, int(17 * GB))]
+
+
+def test_the_largest_model_at_the_smallest_window_that_holds_the_conversation():
+    c = ladder.choose(WINDOWS, int(30 * GB), {}, int(2 * GB), None, needed=30_000)
+    assert c.rung.name == "q35:64k"
+    c = ladder.choose(WINDOWS, int(30 * GB), {}, int(2 * GB), None, needed=140_000)
+    assert c.rung.name == "q35:256k"
+    # not enough for the big model: the small one, still at the smallest window that holds it
+    c = ladder.choose(WINDOWS, int(12 * GB), {}, int(2 * GB), None, needed=100_000)
+    assert c.rung.name == "q9:128k"
+
+
+def test_a_loaded_rung_whose_window_is_too_small_gives_way():
+    c = ladder.choose(WINDOWS, int(12 * GB), {"q9:64k": int(8 * GB)}, int(2 * GB), None,
+                      needed=100_000)
+    assert c.rung.name == "q9:128k" and c.reason == "largest that fits"
+    c = ladder.choose(WINDOWS, int(1 * GB), {"q9:64k": int(8 * GB)}, int(2 * GB), None,
+                      needed=30_000)
+    assert c.rung.name == "q9:64k" and c.reason == "already loaded"
+
+
+def test_a_conversation_longer_than_every_window_is_refused_with_the_numbers():
+    c = ladder.choose(WINDOWS, int(64 * GB), {}, int(2 * GB), None, needed=300_000)
+    assert c.rung is None and "300000" in c.reason and "262144" in c.reason

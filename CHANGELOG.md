@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- A model can be several rungs, one per context window (`model:64k`, `:128k`, `:256k`). The proxy estimates the window a request needs and picks the largest model that fits in memory at its smallest window that holds the conversation, and a loaded rung gives way when its window is too small
+- Thinking is turned off by default, because with it on each turn re-reads the whole conversation instead of reusing the cache (`--thinking` turns it back on)
+- The settings declare a 262,144-token window and a 16,000-token answer
+
 ## 0.1.0
 
 - The proxy, an Anthropic Messages endpoint in front of Ollama that chooses the largest model named `understudy/*` that fits in the memory free right now, keeps a loaded model for the rest of the chat, measures each model's real memory need, and refuses with HTTP 529 and the numbers when nothing fits
