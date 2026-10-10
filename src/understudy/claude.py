@@ -22,7 +22,11 @@ import shutil
 from pathlib import Path
 
 MODEL = "local"
-CONTEXT = 262144          # the largest rung window; Claude Code compacts before it
+# The window Claude Code is told, so it compacts before the conversation outgrows it. 128k, not the
+# 256k the largest rungs have: on a 32 GB machine with other work open, a 9B at 256k (10.6 GB) does
+# not fit beside it, and a chat told 256k never compacts and stalls once it passes 128k (measured
+# 2026-10-11). Raise it with `understudy settings --context 262144` on a machine with room.
+CONTEXT = 131072
 
 
 def mcp_deny(keep: list[str] | tuple[str, ...] = (), home: Path | None = None) -> list[str]:
