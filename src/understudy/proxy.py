@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -46,6 +47,8 @@ class Config:
     timeout: float = 3600.0              # a first turn reads the whole conversation: minutes
     thinking: bool = False               # see the module docstring
     output_cap: int = 16000              # the most of max_tokens counted toward the window
+    ratio: float = 3.5                   # request bytes per prompt token until one is measured
+                                         # (a Claude Code request measured 4.04; lower is safer)
 
     def gpu_budget(self, total: int | None) -> int | None:
         """Apple Silicon lets the GPU wire about three quarters of memory by default (Ollama logs
@@ -68,6 +71,29 @@ class Proxy:
         self.recent: deque = deque(maxlen=50)
         self._choose_lock = threading.Lock()
         self._contexts: dict[tuple[str, str], int | None] = {}
+        self._ratios: deque = deque(self._load_ratios(), maxlen=20)
+
+    # ---- how many tokens a request is, learned from what Ollama counted
+    def _load_ratios(self) -> list[float]:
+        try:
+            return [float(x) for x in json.loads((self.cfg.state / "ratios.json").read_text())]
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def ratio(self) -> float:
+        """Request bytes per prompt token: the smallest of the recent measurements (the one that
+        estimates the most tokens), or the configured default before any."""
+        return min(self._ratios) if self._ratios else self.cfg.ratio
+
+    def observe(self, nbytes: int, tokens: int) -> None:
+        if tokens < 1000:
+            return                       # short requests say little about long ones
+        self._ratios.append(nbytes / tokens)
+        try:
+            self.cfg.state.mkdir(parents=True, exist_ok=True)
+            (self.cfg.state / "ratios.json").write_text(json.dumps(list(self._ratios)))
+        except OSError:
+            pass
 
     # ---- what Ollama has
     def tags(self) -> list[dict]:
@@ -94,9 +120,10 @@ class Proxy:
         return ladder.rungs(tags, self.cfg.prefix, self.measured, contexts)
 
     def needed(self, raw: bytes, body: dict) -> int:
-        """The window a request needs: its prompt, estimated on the high side from the bytes sent
-        (about three bytes a token for JSON full of code), plus room for the answer."""
-        return len(raw) // 3 + min(int(body.get("max_tokens") or 0), self.cfg.output_cap)
+        """The window a request needs: its prompt, from the bytes sent and the measured bytes per
+        token with 5% to spare, plus room for the answer."""
+        return (int(len(raw) / self.ratio() * 1.05)
+                + min(int(body.get("max_tokens") or 0), self.cfg.output_cap))
 
     def choose(self, needed: int = 0) -> ladder.Choice:
         with self._choose_lock:
@@ -146,8 +173,12 @@ class Proxy:
             out["next"] = nxt.as_dict()
         except (OSError, ValueError, urllib.error.URLError) as e:
             out["error"] = f"Ollama did not answer: {e}"
+        out["bytes_per_token"] = round(self.ratio(), 2)
         out["recent"] = list(self.recent)[:10]
         return out
+
+
+INPUT_TOKENS = re.compile(rb'"input_tokens"\s*:\s*(\d+)')
 
 
 def _error(kind: str, message: str) -> bytes:
@@ -215,6 +246,7 @@ def handler_for(proxy: Proxy):
                        if k.lower() in ("content-type", "accept", "anthropic-version")}
             if data is not None:
                 headers["Content-Length"] = str(len(data))
+            tokens = 0
             try:
                 conn.request(self.command, self.path, body=data, headers=headers)
                 r = conn.getresponse()
@@ -228,17 +260,24 @@ def handler_for(proxy: Proxy):
                         self.send_header(k, v)
                 self.send_header("Connection", "close")
                 self.end_headers()
+                tail = b""
                 while True:
                     chunk = r.read1(65536)
                     if not chunk:
                         break
                     self.wfile.write(chunk)
                     self.wfile.flush()
+                    # the prompt's token count, as Ollama reports it in the answer's usage
+                    for m in INPUT_TOKENS.finditer(tail[-64:] + chunk):
+                        tokens = max(tokens, int(m.group(1)))
+                    tail = chunk
             except (BrokenPipeError, ConnectionResetError):
                 pass                              # the client went away; closing tells Ollama
             finally:
                 conn.close()
                 if data is not None:
+                    if tokens:
+                        proxy.observe(len(data), tokens)
                     threading.Thread(target=proxy.measure, daemon=True).start()
 
     return Handler

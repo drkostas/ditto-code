@@ -48,6 +48,8 @@ class FakeOllama(BaseHTTPRequestHandler):
         for i in range(3):
             self.wfile.write(f"event: content_block_delta\ndata: {json.dumps({'i': i})}\n\n".encode())
             self.wfile.flush()
+        # Ollama reports the prompt's token count in the usage at the end of the answer
+        self.wfile.write(b'event: message_delta\ndata: {"usage": {"input_tokens": 2000, "output_tokens": 3}}\n\n')
 
 
 def start(handler):
@@ -143,3 +145,24 @@ def test_a_request_longer_than_every_window_is_refused(proxy):
         post(url, {"model": "local", "max_tokens": 1000,
                    "messages": [{"role": "user", "content": long}]})
     assert e.value.code == 500 and "window" in json.loads(e.value.read())["error"]["message"]
+
+
+def test_bytes_per_token_is_learned_from_what_ollama_counted(proxy, tmp_path):
+    url, free, p = proxy
+    assert p.ratio() == 3.5                       # the default before any measurement
+    body = {"model": "local", "stream": True, "messages": [{"role": "user", "content": "y" * 9000}]}
+    post(url, body).read()
+    sent = len(json.dumps({**body, "model": "understudy/small", "thinking": {"type": "disabled"}}))
+    assert abs(p.ratio() - sent / 2000) < 0.01   # what was sent over what Ollama counted
+    assert json.loads((tmp_path / "ratios.json").read_text())
+
+
+def test_a_local_chat_keeps_only_the_mcp_servers_it_is_told_to(tmp_path):
+    (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": {"drlab": {}, "github": {},
+                                                                      "playwright-1": {}}}))
+    deny = claude.mcp_deny(["drlab"], home=tmp_path)
+    assert "mcp__github" in deny and "mcp__playwright-1" in deny and "mcp__drlab" not in deny
+    assert {"mcp__plugin_*", "mcp__claude_ai_*", "mcp__claude-in-chrome"} <= set(deny)
+    path = tmp_path / "s.json"
+    claude.write_settings(path, "http://127.0.0.1:11435", keep_mcp=["drlab"], home=tmp_path)
+    assert json.loads(path.read_text())["permissions"]["deny"] == deny

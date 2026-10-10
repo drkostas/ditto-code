@@ -64,6 +64,14 @@ understudy status                # free memory, the ladder, what the next reques
 
 `understudy claude` runs `claude --settings ~/.config/understudy/claude-settings.json` with any arguments you add. Your normal Claude Code login is kept and is not used by that chat. Other chats are not affected.
 
+## Which MCP servers a local chat has
+
+Against anything but Anthropic, Claude Code does not load MCP tools on demand. It sends the full schema of every tool of every connected server with every request, and with a few dozen servers that was about 1 MB, more than a local model's whole window. So the settings file denies every MCP server except the ones you name, which removes their tools from the request.
+
+```bash
+understudy --keep-mcp drlab,outline setup-claude
+```
+
 ## What a local chat does not have
 
 - Remote Control. Claude Code turns it off when requests go to anything other than Anthropic.

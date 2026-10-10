@@ -26,6 +26,8 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default=os.environ.get("UNDERSTUDY_URL", "http://127.0.0.1:11435"),
                     help="where the proxy listens (default %(default)s)")
+    ap.add_argument("--keep-mcp", default=os.environ.get("UNDERSTUDY_KEEP_MCP", ""),
+                    help="comma-separated MCP servers a local chat keeps; every other is denied")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
     s.add_argument("--ollama", default=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"))
@@ -67,17 +69,19 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     path = claude.default_path()
+    keep = [k.strip() for k in a.keep_mcp.split(",") if k.strip()]
     if a.cmd == "settings":
-        claude.write_settings(path, a.url, a.context)
+        claude.write_settings(path, a.url, a.context, keep)
         print(path)
         return 0
     if a.cmd == "setup-claude":
-        print(("settings written: " if claude.write_settings(path, a.url) else "settings unchanged: ")
+        print(("settings written: " if claude.write_settings(path, a.url, keep_mcp=keep)
+               else "settings unchanged: ")
               + str(path))
         print(claude.link_skill())
         return 0
     if a.cmd == "claude":
-        claude.write_settings(path, a.url)
+        claude.write_settings(path, a.url, keep_mcp=keep)
         argv2 = claude.command(path, a.args)
         os.execv(argv2[0], argv2) if os.path.isabs(argv2[0]) else os.execvp(argv2[0], argv2)
     return 2
