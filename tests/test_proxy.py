@@ -37,11 +37,15 @@ class FakeOllama(BaseHTTPRequestHandler):
             return self._json({"version": "test"})
         self.send_error(404)
 
+    delay = 0.0                        # seconds before answering, like reading a long prompt
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path == "/api/show":
             return self._json({"parameters": "temperature 0.6\nnum_ctx 131072\n"})
         FakeOllama.seen.append((self.path, body, self.headers.get("anthropic-version")))
+        import time
+        time.sleep(self.delay)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -60,7 +64,7 @@ def start(handler):
 
 @pytest.fixture
 def proxy(tmp_path):
-    FakeOllama.seen, FakeOllama.loaded = [], []
+    FakeOllama.seen, FakeOllama.loaded, FakeOllama.delay = [], [], 0.0
     up = start(FakeOllama)
     free = {"bytes": int(12 * GB)}
     cfg = Config(ollama=f"http://127.0.0.1:{up.server_port}", port=0, state=tmp_path,
@@ -166,3 +170,20 @@ def test_a_local_chat_keeps_only_the_mcp_servers_it_is_told_to(tmp_path):
     path = tmp_path / "s.json"
     claude.write_settings(path, "http://127.0.0.1:11435", keep_mcp=["drlab"], home=tmp_path)
     assert json.loads(path.read_text())["permissions"]["deny"] == deny
+
+
+def test_a_slow_answer_is_kept_alive_with_pings(proxy):
+    url, free, p = proxy
+    p.cfg.ping_every = 0.2
+    FakeOllama.delay = 1.0                     # Ollama reads the prompt and sends nothing for a while
+    text = post(url, {"model": "local", "stream": True,
+                      "messages": [{"role": "user", "content": "hi"}]}).read().decode()
+    assert text.count("event: ping") >= 3      # the client heard from us while Ollama was silent
+    assert text.index("event: ping") < text.index("content_block_delta")
+    assert text.count("content_block_delta") == 3
+
+
+def test_a_local_chat_waits_as_long_as_reading_takes():
+    env = claude.settings()["env"]
+    assert env["API_FORCE_IDLE_TIMEOUT"] == "0"
+    assert env["CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS"] == env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "1800000"

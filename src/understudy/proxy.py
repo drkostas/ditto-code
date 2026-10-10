@@ -21,6 +21,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import socket
 import threading
 import time
 import urllib.error
@@ -47,6 +48,7 @@ class Config:
     timeout: float = 3600.0              # a first turn reads the whole conversation: minutes
     thinking: bool = False               # see the module docstring
     output_cap: int = 16000              # the most of max_tokens counted toward the window
+    ping_every: float = 15.0             # seconds between keep-alive events while Ollama reads
     ratio: float = 3.5                   # request bytes per prompt token until one is measured
                                          # (a Claude Code request measured 4.04; lower is safer)
 
@@ -179,6 +181,17 @@ class Proxy:
 
 
 INPUT_TOKENS = re.compile(rb'"input_tokens"\s*:\s*(\d+)')
+PING = b'event: ping\ndata: {"type": "ping"}\n\n'
+
+
+def _abort(conn: http.client.HTTPConnection) -> None:
+    """Close the connection to Ollama from outside the thread blocked on it; Ollama cancels."""
+    try:
+        if conn.sock is not None:
+            conn.sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    conn.close()
 
 
 def _error(kind: str, message: str) -> bytes:
@@ -237,9 +250,17 @@ def handler_for(proxy: Proxy):
                 body["model"] = c.rung.name
                 if not proxy.cfg.thinking:
                     body["thinking"] = {"type": "disabled"}
-            self._forward(json.dumps(body).encode())
+            self._forward(json.dumps(body).encode(), stream=bool(body.get("stream")))
 
-        def _forward(self, data: bytes | None):
+        def _forward(self, data: bytes | None, stream: bool = False):
+            """Pass the request to Ollama and its answer back.
+
+            A streamed request is answered at once, and a ping event goes to the client every
+            `ping_every` seconds until Ollama starts its answer. Reading a long prompt takes minutes
+            on a laptop and Ollama sends nothing meanwhile, so without them the client gives up
+            (Claude Code timed out at about five minutes). A ping that cannot be delivered means the
+            client left, and closing the connection to Ollama cancels the work there, so a retry
+            does not wait behind a request nobody is reading."""
             u = urlparse(proxy.cfg.ollama)
             conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=proxy.cfg.timeout)
             headers = {k: v for k, v in self.headers.items()
@@ -247,19 +268,52 @@ def handler_for(proxy: Proxy):
             if data is not None:
                 headers["Content-Length"] = str(len(data))
             tokens = 0
-            try:
-                conn.request(self.command, self.path, body=data, headers=headers)
-                r = conn.getresponse()
-            except OSError as e:
-                conn.close()
-                return self._send(502, _error("api_error", f"understudy: Ollama did not answer: {e}"))
-            try:
-                self.send_response(r.status)
-                for k, v in r.getheaders():
-                    if k.lower() in ("content-type", "cache-control"):
-                        self.send_header(k, v)
+            got: dict = {}
+
+            def call():
+                try:
+                    conn.request(self.command, self.path, body=data, headers=headers)
+                    got["r"] = conn.getresponse()
+                except OSError as e:
+                    got["e"] = e
+
+            worker = threading.Thread(target=call, daemon=True)
+            worker.start()
+            if stream:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "close")
                 self.end_headers()
+                while worker.is_alive():
+                    worker.join(proxy.cfg.ping_every)
+                    if worker.is_alive():
+                        try:
+                            self.wfile.write(PING)
+                            self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            _abort(conn)
+                            return
+            else:
+                worker.join()
+            if "e" in got or "r" not in got:
+                conn.close()
+                msg = f"understudy: Ollama did not answer: {got.get('e')}"
+                if stream:
+                    return self._event_error("api_error", msg)
+                return self._send(502, _error("api_error", msg))
+            r = got["r"]
+            try:
+                if stream and r.status != 200:
+                    detail = r.read().decode(errors="replace")[:500]
+                    return self._event_error("api_error", f"understudy: Ollama answered {r.status}: {detail}")
+                if not stream:
+                    self.send_response(r.status)
+                    for k, v in r.getheaders():
+                        if k.lower() in ("content-type", "cache-control"):
+                            self.send_header(k, v)
+                    self.send_header("Connection", "close")
+                    self.end_headers()
                 tail = b""
                 while True:
                     chunk = r.read1(65536)
@@ -279,6 +333,14 @@ def handler_for(proxy: Proxy):
                     if tokens:
                         proxy.observe(len(data), tokens)
                     threading.Thread(target=proxy.measure, daemon=True).start()
+
+        def _event_error(self, kind: str, message: str) -> None:
+            """An error after the 200 has gone out: the way the Anthropic API reports one mid-stream."""
+            try:
+                self.wfile.write(b"event: error\ndata: " + _error(kind, message) + b"\n\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     return Handler
 

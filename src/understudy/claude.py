@@ -51,6 +51,12 @@ def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT,
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS": str(context),
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
         "API_TIMEOUT_MS": "3600000",                 # a first turn on a laptop takes minutes
+        # Reading a 100,000-token prompt took over five minutes with no bytes sent, and Claude Code
+        # gave up at five: its idle timeout (on for non-Anthropic backends) is turned off and the
+        # first-byte and byte watchdogs are set to their 30-minute maximum
+        "API_FORCE_IDLE_TIMEOUT": "0",
+        "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "1800000",
+        "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": "1800000",
         "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
     }
     out = {"model": MODEL, "env": env}
