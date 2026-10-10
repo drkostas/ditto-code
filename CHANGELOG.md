@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- A streamed request is answered at once and kept alive with ping events every 15 seconds until Ollama starts its answer. Reading a long prompt takes minutes and Ollama sends nothing meanwhile, and Claude Code gave up at about five
+- A ping that cannot be delivered means the client left, and the request is cancelled in Ollama, so a retry does not queue behind it
+- The settings turn off Claude Code's idle timeout and set its first-byte and byte watchdogs to the 30-minute maximum
+
 ## 0.3.0
 
 - A local chat keeps only the MCP servers it is told to keep (`--keep-mcp`); every other server, plugin server, claude.ai connector and the Chrome extension is denied in its settings file, which removes their tools from the request. Against a non-Anthropic backend Claude Code sends every connected server's full schemas each time, measured at about 1 MB
