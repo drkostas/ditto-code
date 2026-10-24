@@ -10,7 +10,8 @@ a short conversation on a small window leaves gigabytes free that a large window
 
 What a rung needs in memory is measured, not guessed, wherever possible: once a rung has been
 loaded, Ollama reports its resident size (weights, context cache and buffers), and that number is
-kept per model digest. Until then the need is estimated from the size on disk and the window,
+kept per model digest. Until then the need is estimated from the size on disk, the window and the
+context cache a token keeps (from the model's own attention layout when Ollama says it),
 deliberately on the high side, and the estimate says it is one.
 
 The choice, for a request that needs N tokens of window, in order:
@@ -43,6 +44,15 @@ from .memory import GB, gb
 ESTIMATE_SHARE = 0.05
 ESTIMATE_FIXED = int(1.0 * GB)
 ESTIMATE_PER_TOKEN = 20 * 1024
+#: bytes an element of the context cache takes in the estimate when the model says how many elements
+#: a token keeps (cache_elements). q8_0 is 1.0625; 1.25 is the margin ESTIMATE_PER_TOKEN carries:
+#: Qwen3.5-9B keeps 16,384 elements a token, and 16,384 x 1.25 is exactly its 20 KB.
+#:
+#: ⭐ A SMALL MODEL WAS PRICED AS A 9B. The 20 KB a token held for every rung until 2026-10-24, so a
+#: 2B at 64k was estimated 0.8 GB too large and refused where it would have fitted (a Mac with 5.9 GB
+#: to spare). Its GGUF says 6,144 elements a token. Scaling by size on disk instead would price the
+#: 4B 40% too low: it keeps the 9B's 16,384 (8 full-attention layers of 4 KV heads, 256 + 256).
+CACHE_BYTES_PER_ELEMENT = 1.25
 
 
 @dataclass(frozen=True)
@@ -120,11 +130,52 @@ def num_ctx(parameters: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _count(x) -> int | None:
+    return x if isinstance(x, int) and not isinstance(x, bool) and x > 0 else None
+
+
+def cache_elements(model_info: dict | None) -> int | None:
+    """The context-cache elements a token of window keeps, from the model_info of Ollama's /api/show:
+    each layer that keeps a cache, times its KV heads, times key plus value length. A hybrid model
+    (Qwen3.5, `full_attention_interval` 4) keeps one on every fourth layer only, and its recurrent
+    layers hold a fixed state instead. None when model_info does not say, so the caller falls back
+    to ESTIMATE_PER_TOKEN."""
+    arch = (model_info or {}).get("general.architecture")
+    if not isinstance(arch, str) or not arch:
+        return None
+    get = lambda k: model_info.get(f"{arch}.{k}")   # noqa: E731
+    blocks = _count(get("block_count"))
+    key, value = _count(get("attention.key_length")), _count(get("attention.value_length"))
+    if blocks is None or key is None or value is None:
+        return None
+    kv, recurrent = get("attention.head_count_kv"), get("attention.recurrent_layers")
+    flags = recurrent if isinstance(recurrent, list) and len(recurrent) == blocks else None
+    if isinstance(kv, list):
+        # one KV head count a layer (0 on a layer that keeps no cache)
+        if len(kv) != blocks or any(x is not None and _count(x) is None and x != 0 for x in kv):
+            return None
+        heads = sum(x or 0 for i, x in enumerate(kv) if not (flags and flags[i] is True))
+    elif _count(kv) is not None:
+        if flags:
+            layers = sum(1 for f in flags if f is not True)
+        elif _count(get("full_attention_interval")):
+            layers = blocks // get("full_attention_interval")
+        else:
+            layers = blocks
+        heads = layers * kv
+    else:
+        return None
+    return heads * (key + value) or None
+
+
 def rungs(tags: list[dict], prefix: str, measured: Measurements,
-          contexts: dict[str, int | None] | None = None) -> list[Rung]:
+          contexts: dict[str, int | None] | None = None,
+          per_token: dict[str, int | None] | None = None) -> list[Rung]:
     """The ladder from Ollama's /api/tags models, largest need first. `contexts` maps a model name
-    to its num_ctx (from /api/show); the tag (`:64k`) is the fallback."""
-    contexts = contexts or {}
+    to its num_ctx (from /api/show); the tag (`:64k`) is the fallback. `per_token` maps a model name
+    to the bytes of context cache a token of its window takes (cache_elements, from /api/show);
+    ESTIMATE_PER_TOKEN is the fallback. Both only shape the estimate before a rung is measured."""
+    contexts, per_token = contexts or {}, per_token or {}
     out = []
     for m in tags:
         name = m.get("name") or m.get("model") or ""
@@ -134,7 +185,7 @@ def rungs(tags: list[dict], prefix: str, measured: Measurements,
         ctx = contexts.get(name) or context_from_tag(name)
         size = measured.get(name, digest)
         need = size if size else (int(disk * (1 + ESTIMATE_SHARE)) + ESTIMATE_FIXED
-                                  + (ctx or 131072) * ESTIMATE_PER_TOKEN)
+                                  + (ctx or 131072) * (per_token.get(name) or ESTIMATE_PER_TOKEN))
         out.append(Rung(name, digest, disk, need, size is not None, ctx))
     return sorted(out, key=lambda r: r.need, reverse=True)
 

@@ -72,7 +72,7 @@ class Proxy:
         self.measured = ladder.Measurements(cfg.state / "measured.json")
         self.recent: deque = deque(maxlen=50)
         self._choose_lock = threading.Lock()
-        self._contexts: dict[tuple[str, str], int | None] = {}
+        self._shown: dict[tuple[str, str], tuple[int | None, int | None]] = {}
         self._ratios: deque = deque(self._load_ratios(), maxlen=20)
 
     # ---- how many tokens a request is, learned from what Ollama counted
@@ -104,22 +104,31 @@ class Proxy:
     def loaded(self) -> list[dict]:
         return _get_json(self.cfg.ollama + "/api/ps").get("models", [])
 
-    def context_of(self, name: str, digest: str) -> int | None:
-        """A rung's num_ctx, from Ollama's /api/show, once per model digest."""
+    def _show(self, name: str, digest: str) -> tuple[int | None, int | None]:
+        """A rung's num_ctx and the bytes of context cache a token of its window takes, from
+        Ollama's /api/show, once per model digest."""
         key = (name, digest)
-        if key not in self._contexts:
+        if key not in self._shown:
             req = urllib.request.Request(self.cfg.ollama + "/api/show",
                                          json.dumps({"model": name}).encode(),
                                          {"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=10) as r:
-                self._contexts[key] = ladder.num_ctx(json.loads(r.read()).get("parameters"))
-        return self._contexts[key]
+                shown = json.loads(r.read())
+            elements = ladder.cache_elements(shown.get("model_info"))
+            self._shown[key] = (ladder.num_ctx(shown.get("parameters")),
+                                int(elements * ladder.CACHE_BYTES_PER_ELEMENT) if elements else None)
+        return self._shown[key]
+
+    def context_of(self, name: str, digest: str) -> int | None:
+        """A rung's num_ctx, from Ollama's /api/show, once per model digest."""
+        return self._show(name, digest)[0]
 
     def ladder(self) -> list[ladder.Rung]:
         tags = self.tags()
-        contexts = {m["name"]: self.context_of(m["name"], m.get("digest", ""))
-                    for m in tags if m.get("name", "").startswith(self.cfg.prefix)}
-        return ladder.rungs(tags, self.cfg.prefix, self.measured, contexts)
+        shown = {m["name"]: self._show(m["name"], m.get("digest", ""))
+                 for m in tags if m.get("name", "").startswith(self.cfg.prefix)}
+        return ladder.rungs(tags, self.cfg.prefix, self.measured,
+                            {n: s[0] for n, s in shown.items()}, {n: s[1] for n, s in shown.items()})
 
     def needed(self, raw: bytes, body: dict) -> int:
         """The window a request needs: its prompt, from the bytes sent and the measured bytes per

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- Before a rung has been measured, its context cache is priced from the model's own attention layout (Ollama's `/api/show` model_info: the layers that keep a cache, their KV heads, key and value length) at 1.25 bytes an element, instead of 20 KB a token for every model. 20 KB is the 9B's price, so a Qwen3.5-2B at 64k was estimated 0.8 GB too large and refused on a Mac with 5.9 GB to spare, where it fits. The 4B keeps the 9B's 16,384 elements a token and keeps its price; a model whose layout Ollama does not report keeps 20 KB
+
 ## 0.4.1
 
 - Claude Code is told a 131,072-token window by default, so it compacts before the conversation needs a rung that does not fit beside other work on a 32 GB machine. A chat told 262,144 never compacted and stalled once it passed 128k. `understudy settings --context` raises it
