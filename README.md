@@ -26,7 +26,7 @@ For each request the proxy estimates how many tokens of window the conversation 
 
 The proxy also turns thinking off. Qwen's chat templates leave earlier reasoning out of the history, so with thinking on, each new turn no longer continues what the model has cached, and it reads the whole conversation again. On a 16,000-token prompt that was 4.1 seconds against 0.1 seconds with thinking off, and on a real chat it is minutes. `understudy serve --thinking` turns it back on.
 
-A model's memory need is measured. The first time a model is loaded, Ollama reports how much memory it really takes (the weights, the context cache and the working buffers), and understudy keeps that number for that exact model version. Before the first load it uses a cautious estimate from the file size, and `understudy status` says which numbers are measured.
+A model's memory need is measured. The first time a model is loaded, Ollama reports how much memory it really takes (the weights, the context cache and the working buffers), and understudy keeps that number for that exact model version. Before the first load it uses a cautious estimate from the file size and the context cache a token keeps, which it reads from the model's own attention layout in Ollama (a Qwen3.5-2B keeps about a third of what the 9B and 4B keep), and `understudy status` says which numbers are measured.
 
 ## Install
 

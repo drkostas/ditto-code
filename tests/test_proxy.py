@@ -187,3 +187,30 @@ def test_a_local_chat_waits_as_long_as_reading_takes():
     env = claude.settings()["env"]
     assert env["API_FORCE_IDLE_TIMEOUT"] == "0"
     assert env["CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS"] == env["CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS"] == "1800000"
+
+
+class FakeOllamaWithLayout(FakeOllama):
+    """Ollama's /api/show with model_info, as a Qwen3.5-2B rung answers it."""
+    def do_POST(self):
+        if self.path == "/api/show":
+            n = int(self.headers["Content-Length"])
+            json.loads(self.rfile.read(n))
+            return self._json({"parameters": "num_ctx 65536\n", "model_info": {
+                "general.architecture": "qwen35", "qwen35.block_count": 24,
+                "qwen35.attention.head_count_kv": 2, "qwen35.attention.key_length": 256,
+                "qwen35.attention.value_length": 256, "qwen35.full_attention_interval": 4,
+                "qwen35.attention.recurrent_layers": []}})
+        return super().do_POST()
+
+
+def test_the_proxy_prices_a_rung_by_the_layout_ollama_reports(tmp_path):
+    up = start(FakeOllamaWithLayout)
+    try:
+        cfg = Config(ollama=f"http://127.0.0.1:{up.server_port}", port=0, state=tmp_path)
+        p = Proxy(cfg, available=lambda: int(12 * GB), total=lambda: int(32 * GB))
+        small = next(r for r in p.ladder() if r.name == "understudy/small")
+        # 6 GB on disk, +5%, +1 GB of buffers, and 65,536 tokens of 6,144 elements at 1.25 bytes
+        assert small.context == 65536 and not small.measured
+        assert small.need == int(6 * GB * 1.05) + int(1.0 * GB) + 65536 * int(6144 * 1.25)
+    finally:
+        up.shutdown()
