@@ -6,15 +6,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from understudy import claude
-from understudy.memory import GB
-from understudy.proxy import Config, Proxy, handler_for
+from ditto_code import claude
+from ditto_code.memory import GB
+from ditto_code.proxy import Config, Proxy, handler_for
 
 
 class FakeOllama(BaseHTTPRequestHandler):
     seen: list = []
-    models = [{"name": "understudy/small", "digest": "a", "size": int(6 * GB)},
-              {"name": "understudy/big", "digest": "b", "size": int(20 * GB)}]
+    models = [{"name": "ditto-code/small", "digest": "a", "size": int(6 * GB)},
+              {"name": "ditto-code/big", "digest": "b", "size": int(20 * GB)}]
     loaded: list = []
 
     def log_message(self, *a):
@@ -90,14 +90,14 @@ def test_the_request_goes_to_the_largest_model_that_fits_and_streams_back(proxy)
     assert text.count("content_block_delta") == 3
     path, body, version = FakeOllama.seen[-1]
     # 12 GB free: the 20 GB rung needs ~24 with its estimate, the 6 GB one ~8.6 plus 2 of margin
-    assert path == "/v1/messages" and body["model"] == "understudy/small"
+    assert path == "/v1/messages" and body["model"] == "ditto-code/small"
     assert version == "2023-06-01" and body["messages"][0]["content"] == "hi"
     # thinking is turned off, so the next turn extends what the model has cached
     assert body["thinking"] == {"type": "disabled"}
 
     free["bytes"] = int(40 * GB)
     post(url, {"model": "local", "messages": []}).read()
-    assert FakeOllama.seen[-1][1]["model"] == "understudy/big"
+    assert FakeOllama.seen[-1][1]["model"] == "ditto-code/big"
 
 
 def test_not_enough_memory_is_overloaded_with_the_reason(proxy):
@@ -114,16 +114,16 @@ def test_not_enough_memory_is_overloaded_with_the_reason(proxy):
 def test_status_reports_the_ladder_and_the_next_choice(proxy):
     url, _, _ = proxy
     s = json.loads(urllib.request.urlopen(url + "/status", timeout=10).read())
-    assert [r["name"] for r in s["ladder"]] == ["understudy/big", "understudy/small"]
-    assert s["next"]["model"] == "understudy/small" and s["available_gb"] == 12.0
+    assert [r["name"] for r in s["ladder"]] == ["ditto-code/big", "ditto-code/small"]
+    assert s["next"]["model"] == "ditto-code/small" and s["available_gb"] == 12.0
     assert json.loads(urllib.request.urlopen(url + "/health", timeout=10).read())["ok"] is True
 
 
 def test_a_loaded_model_is_measured_after_the_request(proxy, tmp_path):
     url, _, p = proxy
-    FakeOllama.loaded = [{"name": "understudy/small", "digest": "a", "size": int(7.5 * GB)}]
+    FakeOllama.loaded = [{"name": "ditto-code/small", "digest": "a", "size": int(7.5 * GB)}]
     p.measure()
-    assert p.measured.get("understudy/small", "a") == int(7.5 * GB)
+    assert p.measured.get("ditto-code/small", "a") == int(7.5 * GB)
 
 
 def test_a_local_chat_is_claude_with_a_settings_file(tmp_path):
@@ -156,7 +156,7 @@ def test_bytes_per_token_is_learned_from_what_ollama_counted(proxy, tmp_path):
     assert p.ratio() == 3.5                       # the default before any measurement
     body = {"model": "local", "stream": True, "messages": [{"role": "user", "content": "y" * 9000}]}
     post(url, body).read()
-    sent = len(json.dumps({**body, "model": "understudy/small", "thinking": {"type": "disabled"}}))
+    sent = len(json.dumps({**body, "model": "ditto-code/small", "thinking": {"type": "disabled"}}))
     assert abs(p.ratio() - sent / 2000) < 0.01   # what was sent over what Ollama counted
     assert json.loads((tmp_path / "ratios.json").read_text())
 
@@ -208,7 +208,7 @@ def test_the_proxy_prices_a_rung_by_the_layout_ollama_reports(tmp_path):
     try:
         cfg = Config(ollama=f"http://127.0.0.1:{up.server_port}", port=0, state=tmp_path)
         p = Proxy(cfg, available=lambda: int(12 * GB), total=lambda: int(32 * GB))
-        small = next(r for r in p.ladder() if r.name == "understudy/small")
+        small = next(r for r in p.ladder() if r.name == "ditto-code/small")
         # 6 GB on disk, +5%, +1 GB of buffers, and 65,536 tokens of 6,144 elements at 1.25 bytes
         assert small.context == 65536 and not small.measured
         assert small.need == int(6 * GB * 1.05) + int(1.0 * GB) + 65536 * int(6144 * 1.25)

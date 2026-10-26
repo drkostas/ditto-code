@@ -25,7 +25,7 @@ MODEL = "local"
 # The window Claude Code is told, so it compacts before the conversation outgrows it. 128k, not the
 # 256k the largest rungs have: on a 32 GB machine with other work open, a 9B at 256k (10.6 GB) does
 # not fit beside it, and a chat told 256k never compacts and stalls once it passes 128k (measured
-# 2026-10-11). Raise it with `understudy settings --context 262144` on a machine with room.
+# 2026-10-11). Raise it with `ditto-code settings --context 262144` on a machine with room.
 CONTEXT = 131072
 
 
@@ -45,7 +45,7 @@ def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT,
              deny: list[str] | None = None) -> dict:
     env = {
         "ANTHROPIC_BASE_URL": url,
-        "ANTHROPIC_AUTH_TOKEN": "understudy",        # any value: the proxy checks none, but one
+        "ANTHROPIC_AUTH_TOKEN": "ditto-code",        # any value: the proxy checks none, but one
                                                      # must be set for the base URL to replace the login
         "ANTHROPIC_MODEL": MODEL,
         "ANTHROPIC_DEFAULT_OPUS_MODEL": MODEL,
@@ -70,7 +70,7 @@ def settings(url: str = "http://127.0.0.1:11435", context: int = CONTEXT,
 
 
 def default_path(home: Path | None = None) -> Path:
-    return (home or Path.home()) / ".config" / "understudy" / "claude-settings.json"
+    return (home or Path.home()) / ".config" / "ditto-code" / "claude-settings.json"
 
 
 def write_settings(path: Path, url: str, context: int = CONTEXT,
@@ -92,8 +92,11 @@ def command(path: Path, args: list[str]) -> list[str]:
 
 def link_skill(home: Path | None = None) -> str:
     home = home or Path.home()
-    src = Path(__file__).parent / "skills" / "understudy"
-    link = home / ".claude" / "skills" / "understudy"
+    src = Path(__file__).parent / "skills" / "ditto-code"
+    link = home / ".claude" / "skills" / "ditto-code"
+    old = home / ".claude" / "skills" / "understudy"      # the link this project made before 0.5.0
+    if old.is_symlink() and Path(os.readlink(old)).parts[-2:] == ("skills", "understudy"):
+        old.unlink()
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink():
         if Path(os.readlink(link)) == src:

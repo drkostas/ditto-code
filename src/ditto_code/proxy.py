@@ -41,16 +41,23 @@ class Config:
     ollama: str = "http://127.0.0.1:11434"
     host: str = "127.0.0.1"
     port: int = 11435
-    prefix: str = "understudy/"
+    prefix: str = "ditto-code/"
+    #: model names from before the rename, still read as rungs for one release
+    legacy_prefixes: tuple[str, ...] = ("understudy/",)
     headroom: int = int(2 * GB)
     budget: int | None = None            # the GPU working-set limit; None = derive from total RAM
-    state: Path = field(default_factory=lambda: Path.home() / ".local" / "state" / "understudy")
+    state: Path = field(default_factory=lambda: Path.home() / ".local" / "state" / "ditto-code")
     timeout: float = 3600.0              # a first turn reads the whole conversation: minutes
     thinking: bool = False               # see the module docstring
     output_cap: int = 16000              # the most of max_tokens counted toward the window
     ping_every: float = 15.0             # seconds between keep-alive events while Ollama reads
     ratio: float = 3.5                   # request bytes per prompt token until one is measured
                                          # (a Claude Code request measured 4.04; lower is safer)
+
+    @property
+    def prefixes(self) -> tuple[str, ...]:
+        """Every name prefix a rung may have: the configured one, then the older ones."""
+        return (self.prefix, *[p for p in self.legacy_prefixes if p != self.prefix])
 
     def gpu_budget(self, total: int | None) -> int | None:
         """Apple Silicon lets the GPU wire about three quarters of memory by default (Ollama logs
@@ -126,8 +133,8 @@ class Proxy:
     def ladder(self) -> list[ladder.Rung]:
         tags = self.tags()
         shown = {m["name"]: self._show(m["name"], m.get("digest", ""))
-                 for m in tags if m.get("name", "").startswith(self.cfg.prefix)}
-        return ladder.rungs(tags, self.cfg.prefix, self.measured,
+                 for m in tags if m.get("name", "").startswith(self.cfg.prefixes)}
+        return ladder.rungs(tags, self.cfg.prefixes, self.measured,
                             {n: s[0] for n, s in shown.items()}, {n: s[1] for n, s in shown.items()})
 
     def needed(self, raw: bytes, body: dict) -> int:
@@ -151,7 +158,7 @@ class Proxy:
         """Record the resident size of every loaded rung, so its need is measured from now on."""
         try:
             for m in self.loaded():
-                if m.get("name", "").startswith(self.cfg.prefix):
+                if m.get("name", "").startswith(self.cfg.prefixes):
                     self.measured.put(m["name"], m.get("digest", ""), int(m.get("size", 0)))
         except (OSError, ValueError, urllib.error.URLError):
             pass
@@ -210,7 +217,7 @@ def _error(kind: str, message: str) -> bytes:
 def handler_for(proxy: Proxy):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.0"     # the end of a streamed answer is the connection closing
-        server_version = "understudy"
+        server_version = "ditto-code"
 
         def log_message(self, fmt, *args):
             pass
@@ -249,13 +256,13 @@ def handler_for(proxy: Proxy):
                 try:
                     c = proxy.choose(proxy.needed(raw, body))
                 except (OSError, ValueError, urllib.error.URLError) as e:
-                    return self._send(502, _error("api_error", f"understudy: Ollama did not answer: {e}"))
+                    return self._send(502, _error("api_error", f"ditto-code: Ollama did not answer: {e}"))
                 if c.rung is None:
                     # 529 is "overloaded": Claude Code shows the message and retries with backoff,
                     # which is right for memory that may free up in a minute.
                     code = 529 if c.pool is not None else 500
                     return self._send(code, _error("overloaded_error" if code == 529 else "api_error",
-                                                   "understudy: " + c.reason))
+                                                   "ditto-code: " + c.reason))
                 body["model"] = c.rung.name
                 if not proxy.cfg.thinking:
                     body["thinking"] = {"type": "disabled"}
@@ -307,7 +314,7 @@ def handler_for(proxy: Proxy):
                 worker.join()
             if "e" in got or "r" not in got:
                 conn.close()
-                msg = f"understudy: Ollama did not answer: {got.get('e')}"
+                msg = f"ditto-code: Ollama did not answer: {got.get('e')}"
                 if stream:
                     return self._event_error("api_error", msg)
                 return self._send(502, _error("api_error", msg))
@@ -315,7 +322,7 @@ def handler_for(proxy: Proxy):
             try:
                 if stream and r.status != 200:
                     detail = r.read().decode(errors="replace")[:500]
-                    return self._event_error("api_error", f"understudy: Ollama answered {r.status}: {detail}")
+                    return self._event_error("api_error", f"ditto-code: Ollama answered {r.status}: {detail}")
                 if not stream:
                     self.send_response(r.status)
                     for k, v in r.getheaders():
@@ -358,6 +365,6 @@ def serve(cfg: Config) -> None:
     proxy = Proxy(cfg)
     srv = ThreadingHTTPServer((cfg.host, cfg.port), handler_for(proxy))
     srv.daemon_threads = True
-    print(f"understudy listening on http://{cfg.host}:{cfg.port}, models from {cfg.ollama} "
-          f"named {cfg.prefix}*", flush=True)
+    print(f"ditto-code listening on http://{cfg.host}:{cfg.port}, models from {cfg.ollama} "
+          f"named {' or '.join(p + '*' for p in cfg.prefixes)}", flush=True)
     srv.serve_forever()

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- The project is now ditto-code: the PyPI distribution `ditto-code`, the package `ditto_code`, the command `ditto-code`, the skill `ditto-code`, the settings file `~/.config/ditto-code/claude-settings.json` and the state folder `~/.local/state/ditto-code`. Rungs are Ollama models named `ditto-code/*`
+- For one release the old name still works. The `understudy` command runs ditto-code and says it was renamed, `import understudy` and `python -m understudy.cli` reach the same modules, models named `understudy/*` are still rungs (`Config.legacy_prefixes`), and `UNDERSTUDY_URL` and `UNDERSTUDY_KEEP_MCP` are read when the `DITTO_CODE_` names are not set. `setup-claude` removes the skill link the old name made
+- First release on PyPI: `pip install ditto-code`
+
 ## 0.4.2
 
 - Before a rung has been measured, its context cache is priced from the model's own attention layout (Ollama's `/api/show` model_info: the layers that keep a cache, their KV heads, key and value length) at 1.25 bytes an element, instead of 20 KB a token for every model. 20 KB is the 9B's price, so a Qwen3.5-2B at 64k was estimated 0.8 GB too large and refused on a Mac with 5.9 GB to spare, where it fits. The 4B keeps the 9B's 16,384 elements a token and keeps its price; a model whose layout Ollama does not report keeps 20 KB

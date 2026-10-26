@@ -1,5 +1,5 @@
-from understudy import ladder
-from understudy.memory import GB, parse_meminfo, parse_vm_stat
+from ditto_code import ladder
+from ditto_code.memory import GB, parse_meminfo, parse_vm_stat
 
 VM_STAT = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages free:                               65536.
@@ -30,20 +30,20 @@ def tags(*rows):
 
 def test_ladder_is_the_prefixed_models_largest_first_and_estimates_say_so(tmp_path):
     m = ladder.Measurements(tmp_path / "m.json")
-    t = tags(("understudy/small", "a", 6), ("other/big", "b", 40), ("understudy/big", "c", 20))
-    r = ladder.rungs(t, "understudy/", m)
-    assert [x.name for x in r] == ["understudy/big", "understudy/small"]
+    t = tags(("ditto-code/small", "a", 6), ("other/big", "b", 40), ("ditto-code/big", "c", 20))
+    r = ladder.rungs(t, "ditto-code/", m)
+    assert [x.name for x in r] == ["ditto-code/big", "ditto-code/small"]
     assert not r[0].measured and r[0].need > r[0].disk
 
 
 def test_a_measurement_replaces_the_estimate_only_for_the_same_digest(tmp_path):
     m = ladder.Measurements(tmp_path / "m.json")
-    m.put("understudy/small", "a", int(7 * GB))
-    assert ladder.rungs(tags(("understudy/small", "a", 6)), "understudy/", m)[0].need == int(7 * GB)
+    m.put("ditto-code/small", "a", int(7 * GB))
+    assert ladder.rungs(tags(("ditto-code/small", "a", 6)), "ditto-code/", m)[0].need == int(7 * GB)
     # a re-pulled model has a new digest, so the old measurement no longer applies
-    assert not ladder.rungs(tags(("understudy/small", "z", 6)), "understudy/", m)[0].measured
+    assert not ladder.rungs(tags(("ditto-code/small", "z", 6)), "ditto-code/", m)[0].measured
     # the largest size seen is kept: the context grows during a chat
-    assert m.put("understudy/small", "a", int(6 * GB)) is False
+    assert m.put("ditto-code/small", "a", int(6 * GB)) is False
 
 
 def rung(name, need, context=262144, disk=None):
@@ -87,8 +87,8 @@ def test_nothing_fits_says_why_and_never_loads_blind():
 def test_the_window_comes_from_ollama_or_else_the_tag():
     assert ladder.num_ctx("temperature 0.6\nnum_ctx 65536\n") == 65536
     assert ladder.num_ctx("temperature 0.6") is None
-    assert ladder.context_from_tag("understudy/qwen3.5-9b:128k") == 131072
-    assert ladder.context_from_tag("understudy/qwen3.5-9b") is None
+    assert ladder.context_from_tag("ditto-code/qwen3.5-9b:128k") == 131072
+    assert ladder.context_from_tag("ditto-code/qwen3.5-9b") is None
 
 
 # one model in three windows: the same weights on disk, more context cache for a bigger window
@@ -155,18 +155,18 @@ def test_a_small_model_is_priced_by_its_own_cache_and_takes_the_request_a_9b_can
     # ⭐ 2026-10-24: 5.9 GB could be freed and the 9B was the smallest rung, so a local chat was
     # refused. A 2B (1.9 GB) at 64k was priced with the 9B's 20 KB a token and refused too.
     m = ladder.Measurements(tmp_path / "m.json")
-    t = tags(("understudy/qwen3.5-9b:64k", "a", 6.6), ("understudy/qwen3.5-4b:64k", "b", 3.3),
-             ("understudy/qwen3.5-2b:64k", "c", 1.95))
-    per = {"understudy/qwen3.5-9b:64k": int(16384 * 1.25), "understudy/qwen3.5-4b:64k": int(16384 * 1.25),
-           "understudy/qwen3.5-2b:64k": int(6144 * 1.25)}
-    priced = ladder.rungs(t, "understudy/", m, per_token=per)
+    t = tags(("ditto-code/qwen3.5-9b:64k", "a", 6.6), ("ditto-code/qwen3.5-4b:64k", "b", 3.3),
+             ("ditto-code/qwen3.5-2b:64k", "c", 1.95))
+    per = {"ditto-code/qwen3.5-9b:64k": int(16384 * 1.25), "ditto-code/qwen3.5-4b:64k": int(16384 * 1.25),
+           "ditto-code/qwen3.5-2b:64k": int(6144 * 1.25)}
+    priced = ladder.rungs(t, "ditto-code/", m, per_token=per)
     c = ladder.choose(priced, int(5.9 * GB), {}, int(2 * GB), None, needed=40_000)
-    assert c.rung.name == "understudy/qwen3.5-2b:64k" and c.reason == "largest that fits"
+    assert c.rung.name == "ditto-code/qwen3.5-2b:64k" and c.reason == "largest that fits"
     # without the model's own layout every rung keeps the old 20 KB, and nothing fits
-    assert ladder.choose(ladder.rungs(t, "understudy/", m), int(5.9 * GB), {}, int(2 * GB), None,
+    assert ladder.choose(ladder.rungs(t, "ditto-code/", m), int(5.9 * GB), {}, int(2 * GB), None,
                          needed=40_000).rung is None
     # with more to spare the largest that fits still wins: the 4B is not underpriced by its size
     assert ladder.choose(priced, int(8 * GB), {}, int(2 * GB), None, needed=40_000).rung.name \
-        == "understudy/qwen3.5-4b:64k"
+        == "ditto-code/qwen3.5-4b:64k"
     four = next(r for r in priced if r.name.endswith("4b:64k"))
     assert four.need >= int(3.3 * GB) + 65536 * 16384

@@ -1,27 +1,27 @@
 ---
-name: understudy
-description: Use when work should run on a local model instead of Anthropic's, to save tokens, or when asked to start, check or fix a local chat. understudy runs Claude Code itself on Ollama, choosing the largest local model that fits in the memory free right now, so a local chat has the same tools, instructions and workflow as any other chat.
+name: ditto-code
+description: Use when work should run on a local model instead of Anthropic's, to save tokens, or when asked to start, check or fix a local chat. ditto-code runs Claude Code itself on Ollama, choosing the largest local model that fits in the memory free right now, so a local chat has the same tools, instructions and workflow as any other chat.
 ---
 
-# understudy: Claude Code on a local model
+# ditto-code: Claude Code on a local model
 
 A local chat is an ordinary Claude Code chat whose requests go to a local model. Same harness,
 same tools, same CLAUDE.md files, same skills and MCP servers. Only the model differs.
 
 ```
-claude --settings ~/.config/understudy/claude-settings.json ...    # what a local chat runs
-understudy claude [claude args]                                    # the same, by hand
-understudy status                                                  # memory, ladder, next choice
+claude --settings ~/.config/ditto-code/claude-settings.json ...    # what a local chat runs
+ditto-code claude [claude args]                                    # the same, by hand
+ditto-code status                                                  # memory, ladder, next choice
 ```
 
 The settings file points every request (the main loop, background work such as titles, and
-subagents) at the understudy proxy on `127.0.0.1:11435` under the model name `local`. The proxy
+subagents) at the ditto-code proxy on `127.0.0.1:11435` under the model name `local`. The proxy
 picks a model and passes the request to Ollama.
 
 ## Which model answers
 
-Every Ollama model named `understudy/<x>` is a rung of the ladder, one per context window
-(`understudy/qwen3.5-9b:64k`, `:128k`, `:256k`: same weights, different context cache). For each
+Every Ollama model named `ditto-code/<x>` is a rung of the ladder, one per context window
+(`ditto-code/qwen3.5-9b:64k`, `:128k`, `:256k`: same weights, different context cache). For each
 request the proxy estimates the window it needs (request bytes / 3 plus the answer), then:
 
 1. A loaded rung whose window holds it keeps it. Swapping models mid-chat would mean reading the
@@ -32,7 +32,7 @@ request the proxy estimates the window it needs (request bytes / 3 plus the answ
 3. Otherwise the request is refused with HTTP 529 and the numbers. Claude Code shows the message
    and retries with backoff, so closing a few chats lets it continue.
 
-`understudy status` prints free memory, every rung's need (and whether it was measured or is
+`ditto-code status` prints free memory, every rung's need (and whether it was measured or is
 still an estimate), what is loaded, and the last choices with their reasons.
 
 ## When to send work to a local chat
@@ -69,6 +69,6 @@ tests, read the diff) before building on it. It is a weaker model, whatever the 
   wait for Ollama to release a model.
 - `502 ... Ollama did not answer`: Ollama is down. `curl -s 127.0.0.1:11434/api/version`.
 - A rung's need looks wrong: it is re-measured each time the rung is loaded, keeping the largest
-  size seen for that model digest, in `~/.local/state/understudy/measured.json`.
-- Adding a rung: create an Ollama model named `understudy/<x>:<n>k` with `num_ctx <n*1024>`.
+  size seen for that model digest, in `~/.local/state/ditto-code/measured.json`.
+- Adding a rung: create an Ollama model named `ditto-code/<x>:<n>k` with `num_ctx <n*1024>`.
   Nothing else needs to change, because the ladder is read from Ollama on every request.

@@ -1,3 +1,3 @@
-from .cli import main
+from ditto_code.cli import old_name
 
-raise SystemExit(main())
+raise SystemExit(old_name())

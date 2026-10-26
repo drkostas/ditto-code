@@ -1,10 +1,10 @@
 """The model ladder, and the choice of rung for a request.
 
-A rung is any Ollama model whose name starts with the configured prefix (`understudy/` by
+A rung is any Ollama model whose name starts with the configured prefix (`ditto-code/` by
 default). The ladder is read from Ollama on every choice, so adding or removing a model there is
 the whole of changing it; nothing here keeps a second list that could drift.
 
-One model can be several rungs, one per context window (`understudy/qwen3.5-9b:64k`, `:128k`,
+One model can be several rungs, one per context window (`ditto-code/qwen3.5-9b:64k`, `:128k`,
 `:256k`). They share the weights on disk, but the context cache is reserved when a model loads, so
 a short conversation on a small window leaves gigabytes free that a large window would take.
 
@@ -168,13 +168,14 @@ def cache_elements(model_info: dict | None) -> int | None:
     return heads * (key + value) or None
 
 
-def rungs(tags: list[dict], prefix: str, measured: Measurements,
+def rungs(tags: list[dict], prefix: str | tuple[str, ...], measured: Measurements,
           contexts: dict[str, int | None] | None = None,
           per_token: dict[str, int | None] | None = None) -> list[Rung]:
     """The ladder from Ollama's /api/tags models, largest need first. `contexts` maps a model name
     to its num_ctx (from /api/show); the tag (`:64k`) is the fallback. `per_token` maps a model name
     to the bytes of context cache a token of its window takes (cache_elements, from /api/show);
-    ESTIMATE_PER_TOKEN is the fallback. Both only shape the estimate before a rung is measured."""
+    ESTIMATE_PER_TOKEN is the fallback. Both only shape the estimate before a rung is measured.
+    `prefix` may be several prefixes, as a tuple."""
     contexts, per_token = contexts or {}, per_token or {}
     out = []
     for m in tags:
