@@ -33,7 +33,7 @@ A model's memory need is measured. The first time a model is loaded, Ollama repo
 You need Ollama 0.14 or newer (for its Anthropic Messages endpoint) and Claude Code.
 
 ```bash
-pip install understudy
+pip install git+https://github.com/drkostas/understudy
 understudy setup-claude          # writes the settings file and links the skill into ~/.claude/skills
 understudy serve &               # the proxy; run it under launchd or systemd in real use
 ```
@@ -69,7 +69,7 @@ understudy status                # free memory, the ladder, what the next reques
 Against anything but Anthropic, Claude Code does not load MCP tools on demand. It sends the full schema of every tool of every connected server with every request, and with a few dozen servers that was about 1 MB, more than a local model's whole window. So the settings file denies every MCP server except the ones you name, which removes their tools from the request.
 
 ```bash
-understudy --keep-mcp drlab,outline setup-claude
+understudy --keep-mcp github,notes setup-claude
 ```
 
 ## What a local chat does not have
@@ -87,3 +87,5 @@ understudy --keep-mcp drlab,outline setup-claude
 ## License
 
 MIT
+
+An understudy learns the lead's part and goes on stage when the lead cannot.

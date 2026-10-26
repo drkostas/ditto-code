@@ -162,13 +162,13 @@ def test_bytes_per_token_is_learned_from_what_ollama_counted(proxy, tmp_path):
 
 
 def test_a_local_chat_keeps_only_the_mcp_servers_it_is_told_to(tmp_path):
-    (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": {"drlab": {}, "github": {},
+    (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": {"notes": {}, "github": {},
                                                                       "playwright-1": {}}}))
-    deny = claude.mcp_deny(["drlab"], home=tmp_path)
-    assert "mcp__github" in deny and "mcp__playwright-1" in deny and "mcp__drlab" not in deny
+    deny = claude.mcp_deny(["notes"], home=tmp_path)
+    assert "mcp__github" in deny and "mcp__playwright-1" in deny and "mcp__notes" not in deny
     assert {"mcp__plugin_*", "mcp__claude_ai_*", "mcp__claude-in-chrome"} <= set(deny)
     path = tmp_path / "s.json"
-    claude.write_settings(path, "http://127.0.0.1:11435", keep_mcp=["drlab"], home=tmp_path)
+    claude.write_settings(path, "http://127.0.0.1:11435", keep_mcp=["notes"], home=tmp_path)
     assert json.loads(path.read_text())["permissions"]["deny"] == deny
 
 
